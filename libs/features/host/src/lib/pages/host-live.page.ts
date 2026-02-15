@@ -1,5 +1,6 @@
 import { Component, inject } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
+import { AuthState } from '@quiztime/auth';
 import { LiveSession, SessionState } from '@quiztime/state';
 
 @Component({
@@ -95,39 +96,84 @@ import { LiveSession, SessionState } from '@quiztime/state';
 })
 export class HostLivePage {
   private readonly route = inject(ActivatedRoute);
+  private readonly authState = inject(AuthState);
   private readonly sessionState = inject(SessionState);
 
   readonly sessionId =
     this.route.snapshot.paramMap.get('sessionId') ?? 'unknown';
 
-  simulateResponses(): void {
-    const session = this.currentSession();
+  constructor() {
+    void this.refresh();
+  }
 
-    if (!session || session.phase !== 'question-open') {
+  async simulateResponses(): Promise<void> {
+    await this.refresh();
+  }
+
+  async closeQuestion(): Promise<void> {
+    const accessToken = this.authState.accessToken();
+
+    if (!accessToken) {
       return;
     }
 
-    const responses = Math.min(
-      session.participantCount,
-      session.responsesCount + 1,
-    );
-    this.sessionState.updateResponsesCount(responses);
+    await this.sessionState.transitionOnServer({
+      sessionId: this.sessionId,
+      phase: 'question-closed',
+      accessToken,
+    });
   }
 
-  closeQuestion(): void {
-    this.sessionState.transitionTo('question-closed');
+  async showScoreboard(): Promise<void> {
+    const accessToken = this.authState.accessToken();
+
+    if (!accessToken) {
+      return;
+    }
+
+    await this.sessionState.transitionOnServer({
+      sessionId: this.sessionId,
+      phase: 'scoreboard',
+      accessToken,
+    });
   }
 
-  showScoreboard(): void {
-    this.sessionState.transitionTo('scoreboard');
+  async nextQuestion(): Promise<void> {
+    const accessToken = this.authState.accessToken();
+
+    if (!accessToken) {
+      return;
+    }
+
+    await this.sessionState.transitionOnServer({
+      sessionId: this.sessionId,
+      phase: 'question-open',
+      accessToken,
+    });
   }
 
-  nextQuestion(): void {
-    this.sessionState.transitionTo('question-open');
+  async finishSession(): Promise<void> {
+    const accessToken = this.authState.accessToken();
+
+    if (!accessToken) {
+      return;
+    }
+
+    await this.sessionState.transitionOnServer({
+      sessionId: this.sessionId,
+      phase: 'finished',
+      accessToken,
+    });
   }
 
-  finishSession(): void {
-    this.sessionState.transitionTo('finished');
+  async refresh(): Promise<void> {
+    const accessToken = this.authState.accessToken();
+
+    if (!accessToken) {
+      return;
+    }
+
+    await this.sessionState.refreshAdminSession(this.sessionId, accessToken);
   }
 
   currentSession(): LiveSession | null {

@@ -57,14 +57,15 @@ export class PlayJoinPage {
       return;
     }
 
-    const session = this.sessionState.getSessionByCode(this.code.trim());
+    try {
+      const result = await this.sessionState.joinByCode({
+        code: this.code.trim(),
+        displayName: this.displayName.trim(),
+      });
 
-    if (!session) {
+      await this.router.navigate(['/play/session', result.session.id]);
+    } catch {
       this.error = 'Invalid or expired session code.';
-      return;
     }
-
-    this.sessionState.updateParticipantCount(session.participantCount + 1);
-    await this.router.navigate(['/play/session', session.id]);
   }
 }

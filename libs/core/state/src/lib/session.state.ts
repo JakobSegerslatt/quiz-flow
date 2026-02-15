@@ -1,4 +1,6 @@
-import { computed, Injectable, signal } from '@angular/core';
+import { HttpClient, HttpHeaders } from '@angular/common/http';
+import { computed, inject, Injectable, signal } from '@angular/core';
+import { firstValueFrom } from 'rxjs';
 
 export type SessionPhase =
   | 'lobby'
@@ -18,6 +20,20 @@ export interface LiveSession {
   responsesCount: number;
 }
 
+interface ApiEnvelope<T> {
+  data: T;
+}
+
+interface JoinResult {
+  session: LiveSession;
+  participant: {
+    id: string;
+    displayName: string;
+    score: number;
+  };
+  participantToken: string;
+}
+
 const phaseTransitions: Record<SessionPhase, SessionPhase[]> = {
   lobby: ['question-open'],
   'question-open': ['question-closed'],
@@ -26,17 +42,17 @@ const phaseTransitions: Record<SessionPhase, SessionPhase[]> = {
   finished: [],
 };
 
-function createSessionId(): string {
-  return `session-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function createSessionCode(): string {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-}
+const PARTICIPANT_TOKEN_KEY = 'quiz-time-participant-token';
+const PARTICIPANT_ID_KEY = 'quiz-time-participant-id';
 
 @Injectable({ providedIn: 'root' })
 export class SessionState {
+  private readonly httpClient = inject(HttpClient);
+  private readonly apiBaseUrl = '/api';
+
   readonly currentSession = signal<LiveSession | null>(null);
+  readonly participantToken = signal<string | null>(null);
+  readonly participantId = signal<string | null>(null);
   readonly canTransition = computed(() => {
     const session = this.currentSession();
 
@@ -47,6 +63,15 @@ export class SessionState {
     return phaseTransitions[session.phase].length > 0;
   });
 
+  constructor() {
+    if (typeof localStorage === 'undefined') {
+      return;
+    }
+
+    this.participantToken.set(localStorage.getItem(PARTICIPANT_TOKEN_KEY));
+    this.participantId.set(localStorage.getItem(PARTICIPANT_ID_KEY));
+  }
+
   setCurrentSession(session: LiveSession): void {
     this.currentSession.set(session);
   }
@@ -55,70 +80,145 @@ export class SessionState {
     this.currentSession.set(null);
   }
 
-  startSession(totalQuestions: number, quizId: string): LiveSession {
-    const nextSession: LiveSession = {
-      id: createSessionId(),
-      quizId,
-      code: createSessionCode(),
-      phase: 'lobby',
-      participantCount: 0,
-      currentQuestionIndex: 0,
-      totalQuestions,
-      responsesCount: 0,
-    };
+  async createSessionOnServer(input: {
+    quizId: string;
+    totalQuestions: number;
+    accessToken: string;
+  }): Promise<LiveSession> {
+    const response = await firstValueFrom(
+      this.httpClient.post<ApiEnvelope<LiveSession>>(
+        `${this.apiBaseUrl}/admin/sessions`,
+        {
+          quizId: input.quizId,
+          totalQuestions: input.totalQuestions,
+        },
+        {
+          headers: this.createAuthHeaders(input.accessToken),
+        },
+      ),
+    );
 
-    this.currentSession.set(nextSession);
-    return nextSession;
+    this.currentSession.set(response.data);
+    return response.data;
   }
 
-  getSessionByCode(code: string): LiveSession | null {
-    const session = this.currentSession();
+  async joinByCode(input: {
+    code: string;
+    displayName: string;
+  }): Promise<JoinResult> {
+    const response = await firstValueFrom(
+      this.httpClient.post<ApiEnvelope<JoinResult>>(
+        `${this.apiBaseUrl}/play/join`,
+        {
+          code: input.code,
+          displayName: input.displayName,
+        },
+      ),
+    );
 
-    if (!session) {
-      return null;
+    const result = response.data;
+    this.currentSession.set(result.session);
+    this.participantToken.set(result.participantToken);
+    this.participantId.set(result.participant.id);
+
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(PARTICIPANT_TOKEN_KEY, result.participantToken);
+      localStorage.setItem(PARTICIPANT_ID_KEY, result.participant.id);
     }
 
-    return session.code.toLowerCase() === code.toLowerCase() ? session : null;
+    return result;
   }
 
-  transitionTo(nextPhase: SessionPhase): boolean {
-    const session = this.currentSession();
+  async refreshAdminSession(
+    sessionId: string,
+    accessToken: string,
+  ): Promise<LiveSession> {
+    const response = await firstValueFrom(
+      this.httpClient.get<ApiEnvelope<LiveSession>>(
+        `${this.apiBaseUrl}/admin/sessions/${sessionId}`,
+        {
+          headers: this.createAuthHeaders(accessToken),
+        },
+      ),
+    );
 
-    if (!session) {
-      return false;
+    this.currentSession.set(response.data);
+    return response.data;
+  }
+
+  async refreshPlaySession(sessionId: string): Promise<LiveSession> {
+    const response = await firstValueFrom(
+      this.httpClient.get<ApiEnvelope<LiveSession>>(
+        `${this.apiBaseUrl}/play/sessions/${sessionId}`,
+      ),
+    );
+
+    this.currentSession.set(response.data);
+    return response.data;
+  }
+
+  async transitionOnServer(input: {
+    sessionId: string;
+    phase: SessionPhase;
+    accessToken: string;
+  }): Promise<LiveSession> {
+    const current = this.currentSession();
+
+    if (current) {
+      const allowed =
+        phaseTransitions[current.phase]?.includes(input.phase) ?? false;
+
+      if (!allowed) {
+        return current;
+      }
     }
 
-    const allowed = phaseTransitions[session.phase].includes(nextPhase);
+    const response = await firstValueFrom(
+      this.httpClient.post<ApiEnvelope<LiveSession>>(
+        `${this.apiBaseUrl}/admin/sessions/${input.sessionId}/phase`,
+        {
+          phase: input.phase,
+        },
+        {
+          headers: this.createAuthHeaders(input.accessToken),
+        },
+      ),
+    );
 
-    if (!allowed) {
-      return false;
+    this.currentSession.set(response.data);
+    return response.data;
+  }
+
+  async submitAnswerOnServer(input: {
+    sessionId: string;
+    questionIndex: number;
+    selectedOptionIndex: number;
+    isCorrect: boolean;
+  }): Promise<LiveSession> {
+    const token = this.participantToken();
+
+    if (!token) {
+      throw new Error(
+        'Missing participant token. Please join the session first.',
+      );
     }
 
-    if (nextPhase === 'question-open') {
-      const nextQuestionIndex =
-        session.phase === 'scoreboard'
-          ? Math.min(
-              session.currentQuestionIndex + 1,
-              Math.max(session.totalQuestions - 1, 0),
-            )
-          : session.currentQuestionIndex;
+    const response = await firstValueFrom(
+      this.httpClient.post<ApiEnvelope<LiveSession>>(
+        `${this.apiBaseUrl}/play/sessions/${input.sessionId}/answers`,
+        {
+          questionIndex: input.questionIndex,
+          selectedOptionIndex: input.selectedOptionIndex,
+          isCorrect: input.isCorrect,
+        },
+        {
+          headers: this.createAuthHeaders(token),
+        },
+      ),
+    );
 
-      this.currentSession.set({
-        ...session,
-        phase: nextPhase,
-        currentQuestionIndex: nextQuestionIndex,
-        responsesCount: 0,
-      });
-
-      return true;
-    }
-
-    this.currentSession.set({
-      ...session,
-      phase: nextPhase,
-    });
-
-    return true;
+    this.currentSession.set(response.data);
+    return response.data;
   }
 
   updateParticipantCount(participantCount: number): void {
@@ -144,6 +244,12 @@ export class SessionState {
     this.currentSession.set({
       ...session,
       responsesCount,
+    });
+  }
+
+  private createAuthHeaders(accessToken: string): HttpHeaders {
+    return new HttpHeaders({
+      Authorization: `Bearer ${accessToken}`,
     });
   }
 }

@@ -217,3 +217,59 @@ Recommended route map:
 3. Epic 2 (desktop admin/host)
 4. Epic 3 (mobile live play)
 5. Epic 5 (tests + pilot tuning)
+
+## Pilot runbook (MVP)
+
+### Pilot scope
+
+- 1 host on desktop/laptop
+- 3-8 participants on mobile phones
+- 1 quiz with 5-10 questions
+- 1 complete run from lobby to finished
+
+### Pre-flight checklist
+
+- Host can sign in and access `/admin` and `/host` routes
+- Quiz exists with valid title/questions/options/timer
+- Host can create session and see session code
+- Participants can join with valid code and see error on invalid code
+- API and frontend are both running and reachable on local network
+
+### Live pilot checklist
+
+- Host creates session and confirms participant count updates
+- Host starts first question and participant screens move to question state
+- Participants can select and lock answer once only
+- Timer completes and answer result is shown
+- Scoreboard appears between questions
+- Host advances through at least 3 question cycles
+- Host finishes session and participant sees final state
+
+## Pilot success metrics
+
+Track these for the first 3 pilot runs:
+
+- **Join success rate**: target >= 95%
+- **Join time** (code entry to session view): target <= 20s median
+- **Answer lock success** (single submission per question): target 100%
+- **Question transition reliability** (host phase changes reflected on participants): target >= 95%
+- **Timer clarity score** (subjective, 1-5): target >= 4 average
+- **Tap accuracy issues** (mis-taps reported): target <= 1 issue per run
+
+## Known issues to watch
+
+- Token mismatch between frontend and API auth stubs
+- Session refresh drift (host/participant screens out of sync)
+- Parameterized route SSR/prerender configuration regressions
+- Duplicate participant names in the same session
+- Network failure handling when transitioning phase or submitting answers
+
+## Tuning backlog after pilot
+
+Prioritize fixes in this order:
+
+1. Reliability bugs (state sync, transitions, duplicate submissions)
+2. Join friction (errors, retry flow, clarity)
+3. Mobile interaction polish (button size, spacing, timer visibility)
+4. Host control ergonomics (faster phase actions, clearer status)
+5. Minor visual polish and copy improvements

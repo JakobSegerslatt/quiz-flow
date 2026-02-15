@@ -1,5 +1,6 @@
 import { Component, inject } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
+import { AuthState } from '@quiztime/auth';
 import { LiveSession, SessionState } from '@quiztime/state';
 
 @Component({
@@ -42,9 +43,9 @@ import { LiveSession, SessionState } from '@quiztime/state';
           <button
             class="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100"
             type="button"
-            (click)="incrementParticipants()"
+            (click)="refresh()"
           >
-            +1 participant
+            Refresh participants
           </button>
           <button
             class="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700"
@@ -69,23 +70,38 @@ import { LiveSession, SessionState } from '@quiztime/state';
 })
 export class HostLobbyPage {
   private readonly route = inject(ActivatedRoute);
+  private readonly authState = inject(AuthState);
   private readonly sessionState = inject(SessionState);
 
   readonly sessionId =
     this.route.snapshot.paramMap.get('sessionId') ?? 'unknown';
 
-  incrementParticipants(): void {
-    const current = this.currentSession();
+  constructor() {
+    void this.refresh();
+  }
 
-    if (!current) {
+  async refresh(): Promise<void> {
+    const accessToken = this.authState.accessToken();
+
+    if (!accessToken) {
       return;
     }
 
-    this.sessionState.updateParticipantCount(current.participantCount + 1);
+    await this.sessionState.refreshAdminSession(this.sessionId, accessToken);
   }
 
-  openFirstQuestion(): void {
-    this.sessionState.transitionTo('question-open');
+  async openFirstQuestion(): Promise<void> {
+    const accessToken = this.authState.accessToken();
+
+    if (!accessToken) {
+      return;
+    }
+
+    await this.sessionState.transitionOnServer({
+      sessionId: this.sessionId,
+      phase: 'question-open',
+      accessToken,
+    });
   }
 
   currentSession(): LiveSession | null {

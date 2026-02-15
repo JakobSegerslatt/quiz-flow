@@ -105,6 +105,7 @@ export class PlaySessionPage implements OnDestroy {
   private readonly quizBuilderState = inject(QuizBuilderState);
 
   private intervalId: ReturnType<typeof setInterval> | null = null;
+  private pollIntervalId: ReturnType<typeof setInterval> | null = null;
   private readonly initialQuestionTime = signal(20);
 
   readonly secondsLeft = signal(20);
@@ -156,6 +157,9 @@ export class PlaySessionPage implements OnDestroy {
     this.route.snapshot.paramMap.get('sessionId') ?? 'unknown';
 
   constructor() {
+    void this.sessionState.refreshPlaySession(this.sessionId);
+    this.startPolling();
+
     effect(() => {
       const activeSession = this.session();
       const currentQuestion = this.question();
@@ -178,17 +182,14 @@ export class PlaySessionPage implements OnDestroy {
 
     effect(() => {
       if (this.session()?.phase === 'scoreboard') {
-        window.setTimeout(() => {
-          if (this.session()?.phase === 'scoreboard') {
-            this.sessionState.transitionTo('question-open');
-          }
-        }, 3000);
+        this.selectedOptionIndex.set(null);
       }
     });
   }
 
   ngOnDestroy(): void {
     this.stopTimer();
+    this.stopPolling();
   }
 
   selectAnswer(index: number): void {
@@ -199,16 +200,22 @@ export class PlaySessionPage implements OnDestroy {
     this.selectedOptionIndex.set(index);
   }
 
-  lockAnswer(): void {
+  async lockAnswer(): Promise<void> {
     if (this.selectedOptionIndex() === null || this.isLocked()) {
       return;
     }
 
     this.isLocked.set(true);
     const currentSession = this.session();
+    const selectedOptionIndex = this.selectedOptionIndex();
 
-    if (currentSession) {
-      this.sessionState.updateResponsesCount(currentSession.responsesCount + 1);
+    if (currentSession && selectedOptionIndex !== null) {
+      await this.sessionState.submitAnswerOnServer({
+        sessionId: currentSession.id,
+        questionIndex: currentSession.currentQuestionIndex,
+        selectedOptionIndex,
+        isCorrect: this.isAnswerCorrect(),
+      });
     }
 
     if (this.isAnswerCorrect()) {
@@ -226,12 +233,26 @@ export class PlaySessionPage implements OnDestroy {
         this.secondsLeft.set(0);
         this.isLocked.set(true);
         this.stopTimer();
-        this.sessionState.transitionTo('question-closed');
         return;
       }
 
       this.secondsLeft.set(next);
     }, 1000);
+  }
+
+  private startPolling(): void {
+    this.stopPolling();
+
+    this.pollIntervalId = setInterval(() => {
+      void this.sessionState.refreshPlaySession(this.sessionId);
+    }, 2000);
+  }
+
+  private stopPolling(): void {
+    if (this.pollIntervalId) {
+      clearInterval(this.pollIntervalId);
+      this.pollIntervalId = null;
+    }
   }
 
   private stopTimer(): void {

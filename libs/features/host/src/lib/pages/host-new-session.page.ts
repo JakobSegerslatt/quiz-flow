@@ -1,6 +1,7 @@
 import { Component, computed, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
+import { AuthState } from '@quiztime/auth';
 import { QuizBuilderState, SessionState } from '@quiztime/state';
 
 @Component({
@@ -41,6 +42,7 @@ import { QuizBuilderState, SessionState } from '@quiztime/state';
 })
 export class HostNewSessionPage {
   private readonly router = inject(Router);
+  private readonly authState = inject(AuthState);
   private readonly quizBuilderState = inject(QuizBuilderState);
   private readonly sessionState = inject(SessionState);
 
@@ -51,15 +53,18 @@ export class HostNewSessionPage {
 
   async startSession(): Promise<void> {
     const quiz = this.quizzes().find((item) => item.id === this.selectedQuizId);
+    const accessToken = this.authState.accessToken();
 
-    if (!quiz) {
+    if (!quiz || !accessToken) {
       return;
     }
 
-    const session = this.sessionState.startSession(
-      quiz.questions.length,
-      quiz.id,
-    );
+    const session = await this.sessionState.createSessionOnServer({
+      quizId: quiz.id,
+      totalQuestions: quiz.questions.length,
+      accessToken,
+    });
+
     await this.router.navigate(['/host/session', session.id, 'lobby']);
   }
 }
