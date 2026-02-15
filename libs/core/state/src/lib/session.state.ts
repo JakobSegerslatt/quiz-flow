@@ -9,6 +9,7 @@ export type SessionPhase =
 
 export interface LiveSession {
   id: string;
+  quizId: string;
   code: string;
   phase: SessionPhase;
   participantCount: number;
@@ -54,9 +55,10 @@ export class SessionState {
     this.currentSession.set(null);
   }
 
-  startSession(totalQuestions: number): LiveSession {
+  startSession(totalQuestions: number, quizId: string): LiveSession {
     const nextSession: LiveSession = {
       id: createSessionId(),
+      quizId,
       code: createSessionCode(),
       phase: 'lobby',
       participantCount: 0,
@@ -67,6 +69,16 @@ export class SessionState {
 
     this.currentSession.set(nextSession);
     return nextSession;
+  }
+
+  getSessionByCode(code: string): LiveSession | null {
+    const session = this.currentSession();
+
+    if (!session) {
+      return null;
+    }
+
+    return session.code.toLowerCase() === code.toLowerCase() ? session : null;
   }
 
   transitionTo(nextPhase: SessionPhase): boolean {

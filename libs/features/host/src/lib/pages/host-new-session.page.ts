@@ -56,7 +56,10 @@ export class HostNewSessionPage {
       return;
     }
 
-    const session = this.sessionState.startSession(quiz.questions.length);
+    const session = this.sessionState.startSession(
+      quiz.questions.length,
+      quiz.id,
+    );
     await this.router.navigate(['/host/session', session.id, 'lobby']);
   }
 }
