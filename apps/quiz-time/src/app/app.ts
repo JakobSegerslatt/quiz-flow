@@ -1,4 +1,5 @@
-import { Component } from '@angular/core';
+import { Component, inject } from '@angular/core';
+import { UiModeState } from '@quiztime/state';
 import { RouterModule } from '@angular/router';
 
 @Component({
@@ -8,5 +9,5 @@ import { RouterModule } from '@angular/router';
   styleUrl: './app.scss',
 })
 export class App {
-  protected title = 'quiz-time';
+  private readonly _uiModeState = inject(UiModeState);
 }
